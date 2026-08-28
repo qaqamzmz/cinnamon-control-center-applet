@@ -1,0 +1,6 @@
+{
+	"name": "Centre de Contrôle",
+	"description": "All-in-one Cinnamon panel applet: clock, calendar with Evolution Data Server events, notification history, Wi-Fi and Bluetooth toggles, night light, do-not-disturb, power profiles, volume and screen brightness sliders.",
+	"author": "qaqamzmz",
+	"license": "GPL-2.0-or-later"
+}

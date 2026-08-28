@@ -1,0 +1,32 @@
+# OS & editor
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+*.bak
+.vscode/
+.idea/
+
+# Build & archive artifacts
+*.tar.gz
+*.tar.xz
+*.zip
+build/
+dist/
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Logs & debug traces
+*.log
+*.trace
+*.err
+
+# Local analysis tooling
+sonar-project.properties
+.scannerwork/
+
+# Local backups made while renaming the UUID
+.backup-*/

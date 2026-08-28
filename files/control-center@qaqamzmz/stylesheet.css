@@ -1,0 +1,398 @@
+/*
+ * Control Center applet stylesheet for the Cinnamon desktop.
+ *
+ * Copyright (C) 2026 qaqamzmz <dev@abourame.com>
+ *
+ * Developed with AI assistance under human supervision.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, see <https://www.gnu.org/licenses/>.
+ */
+
+/* ==========================================================================
+   CONTROL CENTER APPLET - ADAPTA-NOKTO-SOFT THEMED
+   ========================================================================== */
+
+.control-center-popup {
+  background-color: rgba(30, 41, 59, 0.97);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.50);
+  color: #E2E8F0;
+  padding: 16px 18px;
+}
+
+.control-center-main-box {
+  min-width: 440px;
+  max-width: 480px;
+  spacing: 14px;
+  padding: 2px 4px;
+}
+
+/* 1. Header */
+.cc-header-box {
+  padding: 2px 4px 12px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.cc-header-date-label {
+  font-size: 1.15em;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.cc-header-actions {
+  spacing: 10px;
+}
+
+.cc-icon-action-btn {
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #E2E8F0;
+  transition-duration: 0.2s;
+}
+
+.cc-icon-action-btn:hover {
+  background-color: #38BDF8;
+  border-color: #38BDF8;
+  color: #FFFFFF;
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.40);
+}
+
+.cc-btn-power:hover {
+  background-color: #EC4899;
+  border-color: #EC4899;
+  box-shadow: 0 2px 8px rgba(236, 72, 153, 0.40);
+}
+
+/* 2. Quick Toggles Grid (Equal dimensions and symmetric proportions) */
+.cc-toggles-container {
+  spacing: 10px;
+  margin: 2px 0;
+}
+
+.cc-toggles-row {
+  spacing: 10px;
+}
+
+.cc-toggle-card {
+  min-height: 52px;
+  height: 52px;
+  min-width: 200px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 8px 12px;
+  transition-duration: 0.2s;
+}
+
+.cc-toggle-card:hover {
+  background-color: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.cc-toggle-card.active {
+  background-color: rgba(56, 189, 248, 0.32);
+  border: 1px solid rgba(56, 189, 248, 0.65);
+  box-shadow: 0 2px 10px rgba(56, 189, 248, 0.30);
+}
+
+.cc-toggle-card-box {
+  spacing: 10px;
+}
+
+.cc-toggle-icon {
+  color: #94A3B8;
+  transition-duration: 0.2s;
+}
+
+.cc-toggle-card.active .cc-toggle-icon,
+.cc-toggle-icon.active {
+  color: #38BDF8;
+}
+
+.cc-toggle-text-col {
+  spacing: 2px;
+}
+
+.cc-toggle-title {
+  font-size: 0.92em;
+  font-weight: 700;
+  color: #E2E8F0;
+}
+
+.cc-toggle-card.active .cc-toggle-title {
+  color: #FFFFFF;
+}
+
+.cc-toggle-sub {
+  font-size: 0.78em;
+  color: #94A3B8;
+}
+
+.cc-toggle-card.active .cc-toggle-sub {
+  color: #BAE6FD;
+}
+
+/* 3. Section Containers (Power Modes & Volume) */
+.cc-section-container {
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+  spacing: 10px;
+}
+
+.cc-section-title {
+  font-size: 0.86em;
+  font-weight: 700;
+  color: #CBD5E1;
+}
+
+.cc-power-modes-row {
+  spacing: 10px;
+}
+
+.cc-power-mode-btn {
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: center;
+  transition-duration: 0.2s;
+}
+
+.cc-power-mode-btn:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+.cc-power-mode-btn.active {
+  background-color: rgba(56, 189, 248, 0.30);
+  border: 1px solid #38BDF8;
+  box-shadow: 0 2px 8px rgba(56, 189, 248, 0.30);
+}
+
+.cc-power-mode-label {
+  font-size: 0.84em;
+  font-weight: 600;
+  color: #E2E8F0;
+}
+
+.cc-power-mode-btn.active .cc-power-mode-label {
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+/* 4. Volume & Brightness Sliders */
+.cc-vol-percent-label,
+.cc-bright-percent-label {
+  font-size: 0.84em;
+  font-weight: 700;
+  color: #38BDF8;
+}
+
+.cc-slider-row {
+  spacing: 12px;
+}
+
+.cc-mute-btn {
+  width: 30px;
+  height: 30px;
+  padding: 5px;
+  border-radius: 6px;
+  color: #E2E8F0;
+  background-color: rgba(255, 255, 255, 0.06);
+  transition-duration: 0.2s;
+}
+
+.cc-mute-btn:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+
+.cc-mute-btn.muted {
+  color: #EC4899;
+  background-color: rgba(236, 72, 153, 0.20);
+}
+
+/* 5. Tabs */
+.cc-tabs-container {
+  spacing: 10px;
+}
+
+.cc-tab-header-box {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 4px;
+  spacing: 6px;
+}
+
+.cc-tab-btn {
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.86em;
+  font-weight: 600;
+  color: #94A3B8;
+  text-align: center;
+  transition-duration: 0.2s;
+}
+
+.cc-tab-btn:hover {
+  color: #FFFFFF;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.cc-tab-btn.active {
+  background-color: rgba(139, 92, 246, 0.35);
+  border: 1px solid rgba(139, 92, 246, 0.50);
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+/* 6. Calendar Tab Content */
+.cc-calendar-tab-box {
+  spacing: 10px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.cc-cal-split {
+  spacing: 14px;
+}
+
+.cc-open-calendar-btn {
+  padding: 8px 14px;
+  background-color: rgba(139, 92, 246, 0.20);
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  border-radius: 6px;
+  font-size: 0.82em;
+  font-weight: 600;
+  color: #C4B5FD;
+  text-align: center;
+  transition-duration: 0.2s;
+}
+
+.cc-open-calendar-btn:hover {
+  background-color: #8B5CF6;
+  border-color: #8B5CF6;
+  color: #FFFFFF;
+}
+
+/* 7. Notifications Tab Content */
+.cc-notif-tab-box {
+  spacing: 10px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 180px;
+}
+
+.cc-notif-top-row {
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.cc-notif-count-label {
+  font-size: 0.86em;
+  font-weight: 700;
+  color: #CBD5E1;
+}
+
+.cc-clear-notifs-btn {
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 0.78em;
+  color: #EC4899;
+  background-color: rgba(236, 72, 153, 0.15);
+  transition-duration: 0.2s;
+}
+
+.cc-clear-notifs-btn:hover {
+  background-color: #EC4899;
+  color: #FFFFFF;
+}
+
+.cc-notif-scrollview {
+  max-height: 220px;
+}
+
+.cc-notif-empty-label {
+  font-size: 0.86em;
+  color: #94A3B8;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.cc-notif-card {
+  background-color: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.cc-notif-title {
+  font-size: 0.88em;
+  font-weight: 700;
+  color: #FFFFFF;
+}
+
+.cc-notif-body {
+  font-size: 0.80em;
+  color: #CBD5E1;
+}
+
+/* 8. Errors Tab Content */
+.cc-errors-tab-box {
+  spacing: 10px;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 12px;
+  min-height: 180px;
+}
+
+.cc-error-card {
+  background-color: rgba(236, 72, 153, 0.10);
+  border: 1px solid rgba(236, 72, 153, 0.25);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  spacing: 4px;
+}
+
+.cc-error-header {
+  spacing: 8px;
+}
+
+.cc-error-service {
+  font-size: 0.82em;
+  font-weight: 700;
+  color: #F472B6;
+}
+
+.cc-error-time {
+  font-size: 0.76em;
+  color: #94A3B8;
+}
+
+.cc-error-msg {
+  font-size: 0.80em;
+  color: #F1F5F9;
+  font-family: monospace;
+}
