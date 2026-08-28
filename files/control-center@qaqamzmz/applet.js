@@ -50,9 +50,10 @@ function runCmd(command) {
 
 // ─── Applet ───────────────────────────────────────────────────────────────────
 class CinnamonControlCenterApplet extends Applet.TextIconApplet {
-    constructor(orientation, panel_height, instance_id) {
+    constructor(metadata, orientation, panel_height, instance_id) {
         super(orientation, panel_height, instance_id);
         this.setAllowedLayout(Applet.AllowedLayout.BOTH);
+        this.metadata = metadata;
         this.orientation = orientation;
         this.instance_id = instance_id;
 
@@ -63,22 +64,21 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.menuManager.addMenu(this.menu);
             this.menu.setCustomStyleClass('control-center-popup');
 
-            // Gio Settings (no AppletSettings needed)
+            // System-wide settings we read directly.
             this.desktop_settings = new Gio.Settings({ schema_id: 'org.cinnamon.desktop.interface' });
             this.color_settings   = new Gio.Settings({ schema_id: 'org.cinnamon.settings-daemon.plugins.color' });
             this.notif_settings   = new Gio.Settings({ schema_id: 'org.cinnamon.desktop.notifications' });
 
-            // Fake settings object: calendar.js only needs getValue and bindWithObject
-            // with keys: "show-events", "show-week-numbers"
-            let fakeSettingsData = { 'show-events': true, 'show-week-numbers': false };
-            this.cal_settings = {
-                getValue: function(key) { return fakeSettingsData[key]; },
-                setValue: function(key, val) { fakeSettingsData[key] = val; },
-                bindWithObject: function(obj, key, prop, cb) {
-                    if (obj) obj[prop] = fakeSettingsData[key];
-                },
-                bind: function(key, prop, cb) {}
-            };
+            // Applet settings, backed by settings-schema.json.
+            // These used to be a hardcoded stand-in object, which meant the settings window
+            // Cinnamon renders from the schema had no effect at all. AppletSettings already
+            // exposes getValue / setValue / bind / bindWithObject -- exactly the interface the
+            // vendored calendar.js and eventView.js expect -- so it can be handed to them
+            // directly.
+            this.settings = new Settings.AppletSettings(this, metadata.uuid, instance_id);
+            this.settings.bind('show-events', 'show_events', () => this._refreshCalendar());
+            this.settings.bind('show-week-numbers', 'show_week_numbers', () => this._refreshCalendar());
+            this.cal_settings = this.settings;
 
             // WallClock
             this.clock = new CinnamonDesktop.WallClock();
@@ -131,6 +131,25 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.clock.disconnect(this.clock_notify_id);
             this.clock_notify_id = 0;
         }
+        if (this.settings) {
+            this.settings.finalize();
+            this.settings = null;
+        }
+    }
+
+    // ── Settings callbacks ─────────────────────────────────────────────────────
+    // Adding an online account is delegated to GNOME Online Accounts on purpose: the
+    // calendar tab reads org.cinnamon.CalendarServer, itself a client of Evolution Data
+    // Server, so any account registered with GOA shows up with no code of our own. Doing
+    // OAuth here would mean shipping a client secret in a world-readable file.
+    on_online_accounts_pressed() {
+        Util.spawnCommandLine('gnome-online-accounts-gtk');
+    }
+
+    // Which calendars are shown is the `Selected` flag Evolution Data Server keeps per
+    // source; the GNOME Calendar sidebar is the supported way to toggle it.
+    on_manage_calendars_pressed() {
+        Util.spawnCommandLine('gnome-calendar');
     }
 
     // ── Build popup ────────────────────────────────────────────────────────────
@@ -717,5 +736,5 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
 }
 
 function main(metadata, orientation, panel_height, instance_id) {
-    return new CinnamonControlCenterApplet(orientation, panel_height, instance_id);
+    return new CinnamonControlCenterApplet(metadata, orientation, panel_height, instance_id);
 }
