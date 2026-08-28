@@ -8,8 +8,9 @@ single control surface.
 - **Power profiles** — Eco / Balanced / Performance, through `powerprofilesctl`.
 - **Sliders** — output volume with mute, and screen brightness (hardware backlight when
   available, `xrandr` otherwise).
-- **Tabs** — calendar with real events from Evolution Data Server, notification history,
-  and a de-duplicated view of recent system errors from the journal.
+- **Tabs** — calendar with real events from Evolution Data Server plus a per-calendar
+  picker, notification history, and a de-duplicated view of recent system errors from the
+  journal.
 
 ## Installation
 
@@ -38,12 +39,20 @@ benefits from it:
 gnome-online-accounts-gtk        # add the account, tick "Calendar"
 ```
 
-Which calendars are displayed is controlled by the `Selected` flag that Evolution Data
-Server keeps for each source. The applet's settings expose a shortcut to manage it; you can
-also tick and untick calendars in the GNOME Calendar sidebar.
+Which calendars are displayed is controlled by the `Selected` flag Evolution Data Server
+keeps for each source. The calendar tab lists every calendar it finds, with a dot in the
+colour EDS stores for it, and clicking a row toggles that flag — the same thing the GNOME
+Calendar sidebar does. A shortcut to Online Accounts sits next to the list, and the applet
+settings hold the same two shortcuts.
 
 This delegation is deliberate: implementing OAuth inside an applet would mean shipping a
 client secret in a world-readable JavaScript file and handling token storage by hand.
+
+The source registry is opened asynchronously — `new_sync()` would block the whole Cinnamon
+process while D-Bus answers — and the applet listens to `source-added`, `source-removed`,
+`source-changed`, `source-enabled` and `source-disabled` so the list follows accounts being
+added or removed elsewhere. If the `EDataServer` typelib is missing, the picker is replaced
+by a single line saying so and the rest of the applet is unaffected.
 
 ## Requirements
 

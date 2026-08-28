@@ -32,6 +32,16 @@ const Main = imports.ui.main;
 const Settings = imports.ui.settings;
 const ByteArray = imports.byteArray;
 
+// Evolution Data Server, used only to list the calendars and flip their "Selected" flag.
+// Optional: if the typelib is missing the calendar picker is simply not shown.
+let EDataServer = null;
+try {
+    imports.gi.versions.EDataServer = '1.2';
+    EDataServer = imports.gi.EDataServer;
+} catch (e) {
+    EDataServer = null;
+}
+
 // Load Calendar modules from local directory
 const Calendar = require('./calendar');
 const EventView = require('./eventView');
@@ -80,6 +90,11 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.settings.bind('show-week-numbers', 'show_week_numbers', () => this._refreshCalendar());
             this.cal_settings = this.settings;
 
+            // Calendar picker (see _initCalendarSources)
+            this._source_registry = null;
+            this._registry_signal_ids = [];
+            this._initCalendarSources();
+
             // WallClock
             this.clock = new CinnamonDesktop.WallClock();
             this.clock_notify_id = this.clock.connect('notify::clock', this._updateClock.bind(this));
@@ -107,6 +122,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
                 if (isOpen) {
                     this._refreshAllStates();
                     this._refreshCalendar();
+                    this._refreshCalendarSources();
                 }
             });
 
@@ -135,6 +151,13 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.settings.finalize();
             this.settings = null;
         }
+        if (this._source_registry) {
+            this._registry_signal_ids.forEach((id) => {
+                try { this._source_registry.disconnect(id); } catch (e) {}
+            });
+            this._registry_signal_ids = [];
+            this._source_registry = null;
+        }
     }
 
     // ── Settings callbacks ─────────────────────────────────────────────────────
@@ -150,6 +173,119 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     // source; the GNOME Calendar sidebar is the supported way to toggle it.
     on_manage_calendars_pressed() {
         Util.spawnCommandLine('gnome-calendar');
+    }
+
+    // ── Calendar picker ────────────────────────────────────────────────────────
+    // Which calendars the applet shows is not ours to decide: cinnamon-calendar-server
+    // only serves sources whose Evolution Data Server "Selected" flag is set. So the
+    // picker below reads the EDS source registry and flips that flag -- the same thing
+    // the GNOME Calendar sidebar does. Accounts themselves stay GNOME Online Accounts'
+    // business.
+    //
+    // The registry is created asynchronously on purpose: new_sync() would block the
+    // whole Cinnamon process while D-Bus answers.
+    _initCalendarSources() {
+        if (!EDataServer) return;
+        try {
+            EDataServer.SourceRegistry.new(null, (obj, res) => {
+                try {
+                    this._source_registry = EDataServer.SourceRegistry.new_finish(res);
+                    ['source-added', 'source-removed', 'source-changed',
+                     'source-enabled', 'source-disabled'].forEach((sig) => {
+                        this._registry_signal_ids.push(
+                            this._source_registry.connect(sig, () => this._refreshCalendarSources())
+                        );
+                    });
+                    this._refreshCalendarSources();
+                } catch (e) {
+                    global.logError('[ControlCenter] EDS registry unavailable: ' + e);
+                }
+            });
+        } catch (e) {
+            global.logError('[ControlCenter] EDS registry request failed: ' + e);
+        }
+    }
+
+    _listCalendarSources() {
+        if (!this._source_registry || !EDataServer) return [];
+        try {
+            return this._source_registry
+                .list_sources(EDataServer.SOURCE_EXTENSION_CALENDAR)
+                .filter((src) => src.get_enabled());
+        } catch (e) {
+            global.logError('[ControlCenter] Cannot list calendars: ' + e);
+            return [];
+        }
+    }
+
+    _refreshCalendarSources() {
+        if (!this.calSourcesBox) return;
+        this.calSourcesBox.destroy_all_children();
+
+        let sources = this._listCalendarSources();
+        if (sources.length === 0) {
+            this.calSourcesBox.add_actor(new St.Label({
+                style_class: 'cc-cal-source-empty',
+                text: EDataServer ? 'Aucun calendrier détecté'
+                                  : 'Evolution Data Server indisponible'
+            }));
+            return;
+        }
+
+        sources.forEach((source) => {
+            let ext = source.get_extension(EDataServer.SOURCE_EXTENSION_CALENDAR);
+            let selected = ext.get_selected();
+
+            let row = new St.Button({
+                style_class: selected ? 'cc-cal-source-row active' : 'cc-cal-source-row',
+                reactive: true,
+                track_hover: true,
+                x_align: St.Align.START
+            });
+            let content = new St.BoxLayout({ vertical: false, style_class: 'cc-cal-source-content' });
+            row.set_child(content);
+
+            // Dot in the calendar's own colour, straight from EDS.
+            let dot = new St.Bin({ style_class: 'cc-cal-source-dot' });
+            let colour = '';
+            try { colour = ext.get_color() || ''; } catch (e) {}
+            if (colour) dot.set_style('background-color: ' + colour + ';');
+            content.add_actor(dot);
+
+            content.add(new St.Label({
+                style_class: 'cc-cal-source-label',
+                text: source.get_display_name()
+            }), { expand: true });
+
+            content.add_actor(new St.Label({
+                style_class: 'cc-cal-source-check',
+                text: selected ? '\u2713' : ''
+            }));
+
+            row.connect('clicked', () => this._toggleCalendarSource(source));
+            this.calSourcesBox.add_actor(row);
+        });
+    }
+
+    _toggleCalendarSource(source) {
+        if (!EDataServer) return;
+        try {
+            let ext = source.get_extension(EDataServer.SOURCE_EXTENSION_CALENDAR);
+            ext.set_selected(!ext.get_selected());
+            // Persist to the EDS source file; the calendar server watches the registry
+            // and picks the change up on its own.
+            source.write(null, (obj, res) => {
+                try {
+                    source.write_finish(res);
+                } catch (e) {
+                    global.logError('[ControlCenter] Cannot save calendar selection: ' + e);
+                }
+                this._refreshCalendarSources();
+                this._refreshCalendar();
+            });
+        } catch (e) {
+            global.logError('[ControlCenter] Cannot toggle calendar: ' + e);
+        }
     }
 
     // ── Build popup ────────────────────────────────────────────────────────────
@@ -434,6 +570,27 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.calContentBox.add_actor(calSplit);
             calSplit.add_actor(this.calendarWidget.actor);
             calSplit.add(this.event_list.actor, { expand: true });
+
+            // Calendar picker: header + one toggle row per EDS calendar.
+            let calSrcHeader = new St.BoxLayout({ vertical: false, style_class: 'cc-cal-source-header' });
+            calSrcHeader.add(new St.Label({ style_class: 'cc-cal-source-title', text: 'Calendriers' }),
+                             { expand: true });
+            let addAccountBtn = new St.Button({
+                style_class: 'cc-cal-source-add',
+                label: '+ Compte en ligne',
+                reactive: true,
+                track_hover: true
+            });
+            addAccountBtn.connect('clicked', () => {
+                this.menu.close();
+                this.on_online_accounts_pressed();
+            });
+            calSrcHeader.add_actor(addAccountBtn);
+            this.calContentBox.add_actor(calSrcHeader);
+
+            this.calSourcesBox = new St.BoxLayout({ vertical: true, style_class: 'cc-cal-sources-box' });
+            this.calContentBox.add_actor(this.calSourcesBox);
+            this._refreshCalendarSources();
 
             // Button to open full GNOME Calendar
             let openCalBtn = new St.Button({
