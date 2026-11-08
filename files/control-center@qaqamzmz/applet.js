@@ -1088,7 +1088,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             for (let line of active.split('\n')) {
                 let lastColon = line.lastIndexOf(':');
                 if (lastColon > 0) {
-                    let rawName = line.substring(0, lastColon).replaceAll('\\:', ':');
+                    let rawName = line.substring(0, lastColon).replaceAll(String.raw`\:`, ':');
                     let connType = line.substring(lastColon + 1);
                     if (connType.includes('wireless') || connType.includes('wifi')) {
                         ssid = rawName.replace(' automatique', '').trim();
