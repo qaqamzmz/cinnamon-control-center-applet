@@ -46,7 +46,51 @@ try {
 const Calendar = require('./calendar');
 const EventView = require('./eventView');
 
+// ─── Security & Command Helpers ──────────────────────────────────────────────
+
+/**
+ * Allowed power profile identifiers accepted by `powerprofilesctl set`.
+ * Used as an explicit allowlist before spawning any subprocess.
+ */
+const ALLOWED_POWER_PROFILES = ['power-saver', 'balanced', 'performance'];
+
+/**
+ * Strictly validates a CSS color string originating from an external source
+ * (such as Evolution Data Server / remote CalDAV metadata) before injecting
+ * it into an inline Clutter/St style attribute.
+ *
+ * Accepts `#RGB`, `#RRGGBB`, `#RRGGBBAA`, `rgb(...)`, `rgba(...)`, or simple
+ * alphabetic color keywords. Rejects anything containing semicolons, quotes,
+ * parentheses outside rgb/rgba, or URLs to prevent CSS injection.
+ *
+ * @param {string} rawColor - Raw color string from EDS
+ * @returns {string} The validated color string, or '' if invalid
+ */
+function sanitizeCssColor(rawColor) {
+    if (typeof rawColor !== 'string') return '';
+    let trimmed = rawColor.trim();
+    if (/^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)|[a-zA-Z]{1,20})$/.test(trimmed)) {
+        return trimmed;
+    }
+    return '';
+}
+
 // ─── Synchronous command runner (GJS/SpiderMonkey safe) ──────────────────────
+/**
+ * Executes a static read-only command synchronously and returns its trimmed stdout.
+ *
+ * Security note: `GLib.spawn_command_line_sync` parses the command string with
+ * `g_shell_parse_argv` (no `/bin/sh` subshell is invoked, so shell metacharacters
+ * like `;`, `|`, `&&`, `$()` are not interpreted). However, callers MUST only
+ * pass fixed command strings without untrusted user input.
+ *
+ * Performance note: Because Cinnamon applets run on the compositor's main GLib
+ * loop, this helper should only be used for fast local queries when the popup
+ * opens or refreshes.
+ *
+ * @param {string} command - Static command line to execute
+ * @returns {string} Trimmed standard output, or '' on error
+ */
 function runCmd(command) {
     try {
         let [res, out, err, status] = GLib.spawn_command_line_sync(command);
@@ -59,6 +103,12 @@ function runCmd(command) {
 }
 
 // ─── Applet ───────────────────────────────────────────────────────────────────
+/**
+ * Main Control Center applet class for the Cinnamon panel.
+ * Displays the current clock in the panel and opens a unified control surface
+ * containing quick toggles, power profiles, audio/brightness sliders, calendar
+ * with EDS event integration, notification history, and systemd journal errors.
+ */
 class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     constructor(metadata, orientation, panel_height, instance_id) {
         super(orientation, panel_height, instance_id);
@@ -68,13 +118,13 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this.instance_id = instance_id;
 
         try {
-            // Menu
+            // Popup menu attached to the panel applet actor
             this.menuManager = new PopupMenu.PopupMenuManager(this);
             this.menu = new Applet.AppletPopupMenu(this, orientation);
             this.menuManager.addMenu(this.menu);
             this.menu.setCustomStyleClass('control-center-popup');
 
-            // System-wide settings we read directly.
+            // System-wide GSettings schemas we read/toggle directly (no shell commands needed)
             this.desktop_settings = new Gio.Settings({ schema_id: 'org.cinnamon.desktop.interface' });
             this.color_settings   = new Gio.Settings({ schema_id: 'org.cinnamon.settings-daemon.plugins.color' });
             this.notif_settings   = new Gio.Settings({ schema_id: 'org.cinnamon.desktop.notifications' });
@@ -95,29 +145,35 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this._registry_signal_ids = [];
             this._initCalendarSources();
 
-            // WallClock
+            // Panel WallClock (updates the panel label every minute/second per user desktop settings)
             this.clock = new CinnamonDesktop.WallClock();
             this.clock_notify_id = this.clock.connect('notify::clock', this._updateClock.bind(this));
             this._updateClock();
 
             this.set_applet_tooltip('Centre de Contrôle');
 
-            // Build UI
+            // Build popup UI sections
             this._buildPopup();
 
-            // Notifications store
+            // Notifications store and signal listener (cleaned up on applet removal)
             this.notifications = [];
+            this._notif_signal_id = 0;
             if (Main.messageTray) {
-                Main.messageTray.connect('notify-applet-update', this._onNotificationUpdate.bind(this));
+                this._notif_signal_id = Main.messageTray.connect(
+                    'notify-applet-update',
+                    this._onNotificationUpdate.bind(this)
+                );
             }
 
-            // First refresh after actors are in scene
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
+            // First refresh once actors are realized in the Clutter scene
+            this._init_timeout_id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
+                this._init_timeout_id = 0;
                 this._refreshAllStates();
                 this._refreshCalendar();
-                return false;
+                return GLib.SOURCE_REMOVE;
             });
 
+            // Refresh all hardware/system states whenever the popup menu is opened
             this.menu.connect('open-state-changed', (menu, isOpen) => {
                 if (isOpen) {
                     this._refreshAllStates();
@@ -131,21 +187,40 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         }
     }
 
+    /**
+     * Synchronizes the panel button label with `CinnamonDesktop.WallClock`.
+     */
     _updateClock() {
         if (!this.clock) return;
         this.set_applet_label(this.clock.get_clock());
     }
 
+    /**
+     * Toggles the popup menu when the user clicks the panel applet.
+     * Note: `_refreshAllStates()` and `_refreshCalendar()` are triggered by the
+     * menu's `open-state-changed` signal when opening, avoiding duplicate blocking
+     * calls on click or unnecessary refreshes when closing.
+     */
     on_applet_clicked(event) {
-        this._refreshAllStates();
-        this._refreshCalendar();
         this.menu.toggle();
     }
 
+    /**
+     * Releases all GObject signals, timers, and settings bindings when the applet
+     * is removed from the panel or reloaded, preventing memory leaks and dangling callbacks.
+     */
     on_applet_removed_from_panel() {
+        if (this._init_timeout_id > 0) {
+            GLib.source_remove(this._init_timeout_id);
+            this._init_timeout_id = 0;
+        }
         if (this.clock && this.clock_notify_id > 0) {
             this.clock.disconnect(this.clock_notify_id);
             this.clock_notify_id = 0;
+        }
+        if (Main.messageTray && this._notif_signal_id > 0) {
+            try { Main.messageTray.disconnect(this._notif_signal_id); } catch (e) {}
+            this._notif_signal_id = 0;
         }
         if (this.settings) {
             this.settings.finalize();
@@ -245,10 +320,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             let content = new St.BoxLayout({ vertical: false, style_class: 'cc-cal-source-content' });
             row.set_child(content);
 
-            // Dot in the calendar's own colour, straight from EDS.
+            // Dot in the calendar's own colour, straight from EDS (sanitized against CSS injection).
             let dot = new St.Bin({ style_class: 'cc-cal-source-dot' });
             let colour = '';
-            try { colour = ext.get_color() || ''; } catch (e) {}
+            try { colour = sanitizeCssColor(ext.get_color() || ''); } catch (e) {}
             if (colour) dot.set_style('background-color: ' + colour + ';');
             content.add_actor(dot);
 
@@ -267,6 +342,12 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         });
     }
 
+    /**
+     * Toggles the `Selected` property of an Evolution Data Server calendar source
+     * and persists the change asynchronously via `source.write()`.
+     *
+     * @param {EDataServer.Source} source - The calendar source to toggle
+     */
     _toggleCalendarSource(source) {
         if (!EDataServer) return;
         try {
@@ -289,6 +370,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     }
 
     // ── Build popup ────────────────────────────────────────────────────────────
+    /**
+     * Assembles all visual sections of the Control Center popup menu.
+     */
     _buildPopup() {
         this.mainBox = new St.BoxLayout({ style_class: 'control-center-main-box', vertical: true });
         this.menu.addActor(this.mainBox);
@@ -301,6 +385,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this._buildTabs();
     }
 
+    /**
+     * Builds the top header bar displaying the current formatted date and
+     * quick action buttons (System Settings, Screen Lock, Power Off dialog).
+     */
     _buildHeader() {
         let box = new St.BoxLayout({ style_class: 'cc-header-box', vertical: false });
         this.mainBox.add_actor(box);
@@ -328,6 +416,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         actions.add_actor(pwrBtn);
     }
 
+    /**
+     * Helper to create a circular symbolic icon button for the header bar.
+     */
     _mkIconBtn(iconName, cb) {
         let btn = new St.Button({ style_class: 'cc-icon-action-btn', reactive: true, track_hover: true });
         btn.set_child(new St.Icon({ icon_name: iconName, icon_type: St.IconType.SYMBOLIC, icon_size: 16 }));
@@ -335,12 +426,18 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         return btn;
     }
 
+    /**
+     * Formats the current date in French long format (e.g., "Dimanche 8 novembre 2026").
+     */
     _formatDate() {
         let now = new Date();
         let s = now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
         return s.charAt(0).toUpperCase() + s.slice(1);
     }
 
+    /**
+     * Builds the 2x2 grid of quick toggle cards: Wi-Fi, Bluetooth, Night Light, and Do Not Disturb.
+     */
     _buildQuickToggles() {
         let grid = new St.BoxLayout({ style_class: 'cc-toggles-container', vertical: true });
         this.mainBox.add_actor(grid);
@@ -360,6 +457,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         row2.add(this.dndToggle.actor, { expand: true, x_fill: true, y_fill: true });
     }
 
+    /**
+     * Creates a reusable toggle card widget with an icon, title, and status subtitle.
+     */
     _mkToggleCard(iconName, title, cb) {
         let btn = new St.Button({
             style_class: 'cc-toggle-card', reactive: true, track_hover: true, x_fill: true, y_fill: true
@@ -394,6 +494,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         };
     }
 
+    /**
+     * Builds the Power Profiles selector (Eco / Balanced / Performance) backed by `powerprofilesctl`.
+     */
     _buildPowerModes() {
         let box = new St.BoxLayout({ style_class: 'cc-section-container', vertical: true });
         this.mainBox.add_actor(box);
@@ -412,6 +515,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         });
     }
 
+    /**
+     * Builds the master audio output volume slider and mute toggle button (via `pactl`).
+     */
     _buildVolumeSlider() {
         let box = new St.BoxLayout({ style_class: 'cc-section-container', vertical: true });
         this.mainBox.add_actor(box);
@@ -436,13 +542,20 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
 
         this.volumeSlider = new PopupMenu.PopupSliderMenuItem(0.5);
         this.volumeSlider.connect('value-changed', (item, value) => {
-            let pct = Math.round(value * 100);
+            // Clamp percentage to safe integer bounds [0, 150] before passing to pactl
+            let num = Number(value);
+            if (!Number.isFinite(num)) return;
+            let pct = Math.max(0, Math.min(150, Math.round(num * 100)));
             this.volPercentLabel.set_text(pct + '%');
             Util.spawnCommandLine('pactl set-sink-volume @DEFAULT_SINK@ ' + pct + '%');
         });
         sliderRow.add(this.volumeSlider.actor, { expand: true });
     }
 
+    /**
+     * Builds the screen brightness slider. Uses Cinnamon's Power D-Bus backlight interface
+     * when available (laptops) and falls back to `xrandr --brightness` (desktop monitors).
+     */
     _buildBrightnessSlider() {
         let box = new St.BoxLayout({ style_class: 'cc-section-container', vertical: true });
         this.mainBox.add_actor(box);
@@ -466,7 +579,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
 
         this.brightnessSlider = new PopupMenu.PopupSliderMenuItem(1.0);
         this.brightnessSlider.connect('value-changed', (item, value) => {
-            let val = Math.max(0.15, value);
+            let val = Math.max(0.15, Math.min(1.0, Number(value) || 1.0));
             this._setBrightness(val);
         });
         sliderRow.add(this.brightnessSlider.actor, { expand: true });
@@ -484,22 +597,35 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         } catch (e) {}
     }
 
+    /**
+     * Detects and caches the primary connected X11 display output name via `xrandr --current`.
+     * Validates the connector identifier against a strict alphanumeric/hyphen regex to prevent
+     * unexpected argument injection when invoking `xrandr`.
+     */
     _getPrimaryMonitorName() {
         if (this._cachedMonitorName) return this._cachedMonitorName;
         let out = runCmd('xrandr --current');
-        let m = out.match(/^(\S+)\s+connected\s+primary/m) || out.match(/^(\S+)\s+connected/m);
+        let m = out.match(/^([A-Za-z0-9_.-]+)\s+connected\s+primary/m) ||
+                out.match(/^([A-Za-z0-9_.-]+)\s+connected/m);
         this._cachedMonitorName = m ? m[1] : 'HDMI-A-0';
         return this._cachedMonitorName;
     }
 
+    /**
+     * Applies the requested screen brightness level (`val` in [0.15, 1.0]) via both
+     * `xrandr` software gamma/brightness and the Cinnamon Power D-Bus backlight proxy.
+     */
     _setBrightness(val) {
-        let pct = Math.round(val * 100);
+        let safeVal = Math.max(0.15, Math.min(1.0, Number(val) || 1.0));
+        let pct = Math.round(safeVal * 100);
         this.brightPercentLabel.set_text(pct + '%');
-        this.brightnessSlider.setValue(val);
-        this._currentBrightnessVal = val;
+        this.brightnessSlider.setValue(safeVal);
+        this._currentBrightnessVal = safeVal;
 
         let mon = this._getPrimaryMonitorName();
-        Util.spawnCommandLine("xrandr --output " + mon + " --brightness " + val.toFixed(2));
+        if (/^[A-Za-z0-9_.-]+$/.test(mon)) {
+            Util.spawnCommandLine('xrandr --output ' + mon + ' --brightness ' + safeVal.toFixed(2));
+        }
 
         if (this._csdBacklightProxy && this._csdBacklightProxy.SetPercentageRemote) {
             try {
@@ -508,6 +634,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         }
     }
 
+    /**
+     * Queries the current screen brightness from the Cinnamon Power D-Bus backlight proxy
+     * (or falls back to the last cached value) and updates the slider UI.
+     */
     _refreshBrightness() {
         if (this._currentBrightnessVal !== undefined) {
             let pct = Math.round(this._currentBrightnessVal * 100);
@@ -533,6 +663,12 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         }
     }
 
+    /**
+     * Builds the bottom 3-tab view:
+     *  0: Agenda / Calendar (month grid + event list + EDS calendar source picker)
+     *  1: Notifications history
+     *  2: System / systemd journal critical errors (priorities 0..3, deduplicated)
+     */
     _buildTabs() {
         let tabsBox = new St.BoxLayout({ style_class: 'cc-tabs-container', vertical: true });
         this.mainBox.add_actor(tabsBox);
@@ -648,6 +784,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this.errorsScrollView.add_actor(this.errorsItemsBox);
     }
 
+    /**
+     * Switches the visible tab (0 = Calendar, 1 = Notifications, 2 = Journal Errors)
+     * and refreshes the newly displayed view.
+     */
     _switchTab(i) {
         this.tabBtnCalendar.style_class = i === 0 ? 'cc-tab-btn active' : 'cc-tab-btn';
         this.tabBtnNotifs.style_class   = i === 1 ? 'cc-tab-btn active' : 'cc-tab-btn';
@@ -670,6 +810,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     }
 
     // ── Refresh ────────────────────────────────────────────────────────────────
+    /**
+     * Refreshes all quick toggles, power profile buttons, audio volume, and screen brightness.
+     */
     _refreshAllStates() {
         this.headerDateLabel.set_text(this._formatDate());
         this._refreshWifi();
@@ -681,6 +824,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this._refreshBrightness();
     }
 
+    /**
+     * Reloads the calendar widget and requests the events for the currently selected date.
+     */
     _refreshCalendar() {
         try {
             if (this.calendarWidget && this.calendarWidget.setDate) {
@@ -695,6 +841,11 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         }
     }
 
+    /**
+     * Queries `journalctl` for recent priority 0..3 (emerg, alert, crit, err) entries,
+     * deduplicates identical messages across process PID restarts, and renders up to
+     * 15 unique critical errors.
+     */
     _refreshErrors() {
         this.errorsItemsBox.destroy_all_children();
 
@@ -773,17 +924,25 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         });
     }
 
+    /**
+     * Queries NetworkManager (`nmcli`) for the active Wi-Fi connection SSID and radio state.
+     * Uses `lastIndexOf(':')` so SSIDs containing escaped colons (`\:`) are parsed accurately.
+     */
     _refreshWifi() {
         // Check active connections first (most reliable)
         let active = runCmd('nmcli -t -f NAME,TYPE connection show --active');
         let ssid = '', isOn = false;
         if (active) {
             for (let line of active.split('\n')) {
-                let parts = line.split(':');
-                if (parts.length >= 2 && (parts[1].includes('wireless') || parts[1].includes('wifi'))) {
-                    ssid = parts[0].replace(' automatique', '').trim();
-                    isOn = true;
-                    break;
+                let lastColon = line.lastIndexOf(':');
+                if (lastColon > 0) {
+                    let rawName = line.substring(0, lastColon).replace(/\\:/g, ':');
+                    let connType = line.substring(lastColon + 1);
+                    if (connType.includes('wireless') || connType.includes('wifi')) {
+                        ssid = rawName.replace(' automatique', '').trim();
+                        isOn = true;
+                        break;
+                    }
                 }
             }
         }
@@ -795,6 +954,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this.wifiToggle.setActive(isOn, isOn ? (ssid || 'Activé') : 'Désactivé');
     }
 
+    /**
+     * Toggles the Wi-Fi radio state via `nmcli radio wifi on|off`.
+     */
     _toggleWifi() {
         let ns = !this.wifiToggle.active;
         this.wifiToggle.setActive(ns, ns ? 'Activation...' : 'Désactivé');
@@ -802,6 +964,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 800, () => { this._refreshWifi(); return false; });
     }
 
+    /**
+     * Checks Bluetooth adapter state via `rfkill` and `bluetoothctl`.
+     */
     _refreshBluetooth() {
         let rfkill = runCmd('rfkill list bluetooth');
         let btctl  = runCmd('bluetoothctl show');
@@ -810,6 +975,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this.btToggle.setActive(isOn, isOn ? 'Activé' : 'Désactivé');
     }
 
+    /**
+     * Toggles Bluetooth soft-block and adapter power via `rfkill` and `bluetoothctl`.
+     */
     _toggleBluetooth() {
         let ns = !this.btToggle.active;
         this.btToggle.setActive(ns, ns ? 'Activation...' : 'Désactivation...');
@@ -818,6 +986,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => { this._refreshBluetooth(); return false; });
     }
 
+    /**
+     * Reads the Cinnamon Night Light state from GSettings (`org.cinnamon.settings-daemon.plugins.color`).
+     */
     _refreshNightLight() {
         try {
             let on = this.color_settings.get_boolean('night-light-enabled');
@@ -825,6 +996,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         } catch(e) { this.nightToggle.setActive(false, 'N/A'); }
     }
 
+    /**
+     * Flips the Cinnamon Night Light boolean in GSettings.
+     */
     _toggleNightLight() {
         try {
             let on = this.color_settings.get_boolean('night-light-enabled');
@@ -833,6 +1007,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         } catch(e) {}
     }
 
+    /**
+     * Reads the Do Not Disturb state (inverted `display-notifications` key in `org.cinnamon.desktop.notifications`).
+     */
     _refreshDnd() {
         try {
             let notifs = this.notif_settings.get_boolean('display-notifications');
@@ -840,6 +1017,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         } catch(e) { this.dndToggle.setActive(false, 'Désactivé'); }
     }
 
+    /**
+     * Toggles Do Not Disturb by flipping `display-notifications` in GSettings.
+     */
     _toggleDnd() {
         try {
             let notifs = this.notif_settings.get_boolean('display-notifications');
@@ -848,6 +1028,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         } catch(e) {}
     }
 
+    /**
+     * Queries the active power profile via `powerprofilesctl get` and highlights the matching button.
+     */
     _refreshPowerMode() {
         let current = runCmd('powerprofilesctl get') || 'balanced';
         for (let id in this.powerButtons) {
@@ -855,11 +1038,19 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         }
     }
 
+    /**
+     * Sets the system power profile via `powerprofilesctl set <id>` after validating
+     * `id` against `ALLOWED_POWER_PROFILES`.
+     */
     _setPowerMode(id) {
+        if (!ALLOWED_POWER_PROFILES.includes(id)) return;
         Util.spawnCommandLine('powerprofilesctl set ' + id);
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => { this._refreshPowerMode(); return false; });
     }
 
+    /**
+     * Queries PulseAudio/PipeWire default sink volume and mute status via `pactl`.
+     */
     _refreshVolume() {
         let volRaw = runCmd('pactl get-sink-volume @DEFAULT_SINK@');
         let m = volRaw.match(/(\d+)%/);
@@ -873,8 +1064,14 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         this.muteBtn.style_class = muted ? 'cc-mute-btn muted' : 'cc-mute-btn';
     }
 
+    /**
+     * Callback invoked when Cinnamon's message tray emits `notify-applet-update`.
+     */
     _onNotificationUpdate() { this._refreshNotifications(); }
 
+    /**
+     * Rebuilds the notification cards list in the Notifications tab.
+     */
     _refreshNotifications() {
         this.notifItemsBox.destroy_all_children();
         let n = this.notifications.length;
@@ -892,6 +1089,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     }
 }
 
+/**
+ * Cinnamon applet entry point.
+ */
 function main(metadata, orientation, panel_height, instance_id) {
     return new CinnamonControlCenterApplet(metadata, orientation, panel_height, instance_id);
 }

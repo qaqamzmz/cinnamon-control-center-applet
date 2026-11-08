@@ -28,5 +28,10 @@ __pycache__/
 sonar-project.properties
 .scannerwork/
 
+# Secrets & environment files
+.env
+.env.*
+.env.local
+
 # Local backups made while renaming the UUID
 .backup-*/
