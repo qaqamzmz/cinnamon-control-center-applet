@@ -39,6 +39,7 @@ try {
     imports.gi.versions.EDataServer = '1.2';
     EDataServer = imports.gi.EDataServer;
 } catch (e) {
+    global.logWarning('[ControlCenter] Optional EDataServer typelib not installed: ' + e);
     EDataServer = null;
 }
 
@@ -52,7 +53,7 @@ const EventView = require('./eventView');
  * Allowed power profile identifiers accepted by `powerprofilesctl set`.
  * Used as an explicit allowlist before spawning any subprocess.
  */
-const ALLOWED_POWER_PROFILES = ['power-saver', 'balanced', 'performance'];
+const ALLOWED_POWER_PROFILES = new Set(['power-saver', 'balanced', 'performance']);
 
 /**
  * Strictly validates a CSS color string originating from an external source
@@ -319,7 +320,11 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this._init_timeout_id = 0;
         }
         if (global.settings && this._enabled_applets_sig_id > 0) {
-            try { global.settings.disconnect(this._enabled_applets_sig_id); } catch (e) {}
+            try {
+                global.settings.disconnect(this._enabled_applets_sig_id);
+            } catch (e) {
+                global.logWarning('[ControlCenter] Disconnect enabled-applets signal failed: ' + e);
+            }
             this._enabled_applets_sig_id = 0;
         }
         if (this.clock && this.clock_notify_id > 0) {
@@ -327,7 +332,11 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.clock_notify_id = 0;
         }
         if (Main.messageTray && this._notif_signal_id > 0) {
-            try { Main.messageTray.disconnect(this._notif_signal_id); } catch (e) {}
+            try {
+                Main.messageTray.disconnect(this._notif_signal_id);
+            } catch (e) {
+                global.logWarning('[ControlCenter] Disconnect messageTray signal failed: ' + e);
+            }
             this._notif_signal_id = 0;
         }
         if (this.settings) {
@@ -336,7 +345,11 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         }
         if (this._source_registry) {
             this._registry_signal_ids.forEach((id) => {
-                try { this._source_registry.disconnect(id); } catch (e) {}
+                try {
+                    this._source_registry.disconnect(id);
+                } catch (e) {
+                    global.logWarning('[ControlCenter] Disconnect EDS signal failed: ' + e);
+                }
             });
             this._registry_signal_ids = [];
             this._source_registry = null;
@@ -431,7 +444,11 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             // Dot in the calendar's own colour, straight from EDS (sanitized against CSS injection).
             let dot = new St.Bin({ style_class: 'cc-cal-source-dot' });
             let colour = '';
-            try { colour = sanitizeCssColor(ext.get_color() || ''); } catch (e) {}
+            try {
+                colour = sanitizeCssColor(ext.get_color() || '');
+            } catch (e) {
+                global.logWarning('[ControlCenter] Cannot read EDS source color: ' + e);
+            }
             if (colour) dot.set_style('background-color: ' + colour + ';');
             content.add_actor(dot);
 
@@ -695,14 +712,16 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         // Connect to Cinnamon Power DBus if available
         try {
             let Interfaces = imports.misc.interfaces;
-            if (Interfaces && Interfaces.getDBusProxyAsync) {
+            if (Interfaces?.getDBusProxyAsync) {
                 Interfaces.getDBusProxyAsync("org.cinnamon.SettingsDaemon.Power.Screen", (proxy, error) => {
                     if (!error && proxy) {
                         this._csdBacklightProxy = proxy;
                     }
                 });
             }
-        } catch (e) {}
+        } catch (e) {
+            global.logWarning('[ControlCenter] Power.Screen DBus proxy unavailable: ' + e);
+        }
     }
 
     /**
@@ -713,8 +732,8 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     _getPrimaryMonitorName() {
         if (this._cachedMonitorName) return this._cachedMonitorName;
         let out = runCmd('xrandr --current');
-        let m = out.match(/^([A-Za-z0-9_.-]+)\s+connected\s+primary/m) ||
-                out.match(/^([A-Za-z0-9_.-]+)\s+connected/m);
+        let m = /^([A-Za-z0-9_.-]+)\s+connected\s+primary/m.exec(out) ||
+                /^([A-Za-z0-9_.-]+)\s+connected/m.exec(out);
         this._cachedMonitorName = m ? m[1] : 'HDMI-A-0';
         return this._cachedMonitorName;
     }
@@ -735,10 +754,12 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             Util.spawnCommandLine('xrandr --output ' + mon + ' --brightness ' + safeVal.toFixed(2));
         }
 
-        if (this._csdBacklightProxy && this._csdBacklightProxy.SetPercentageRemote) {
+        if (this._csdBacklightProxy?.SetPercentageRemote) {
             try {
                 this._csdBacklightProxy.SetPercentageRemote(pct, () => {});
-            } catch (e) {}
+            } catch (e) {
+                global.logWarning('[ControlCenter] SetPercentageRemote failed: ' + e);
+            }
         }
     }
 
@@ -757,7 +778,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.brightnessSlider.setValue(1.0);
         }
 
-        if (this._csdBacklightProxy && this._csdBacklightProxy.GetPercentageRemote) {
+        if (this._csdBacklightProxy?.GetPercentageRemote) {
             try {
                 this._csdBacklightProxy.GetPercentageRemote((pct, error) => {
                     if (!error && pct !== null && pct !== undefined) {
@@ -767,7 +788,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
                         this.brightnessSlider.setValue(v);
                     }
                 });
-            } catch (e) {}
+            } catch (e) {
+                global.logWarning('[ControlCenter] GetPercentageRemote failed: ' + e);
+            }
         }
     }
 
@@ -803,7 +826,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             this.events_manager = new EventView.EventsManager(this.cal_settings, this.desktop_settings);
             this.calendarWidget = new Calendar.Calendar(this.cal_settings, this.events_manager);
             this.calendarWidget.connect('selected-date-changed', (cal, date) => {
-                if (this.events_manager && this.events_manager.select_date) {
+                if (this.events_manager?.select_date) {
                     this.events_manager.select_date(date);
                 }
             });
@@ -937,9 +960,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
      */
     _refreshCalendar() {
         try {
-            if (this.calendarWidget && this.calendarWidget.setDate) {
+            if (this.calendarWidget?.setDate) {
                 this.calendarWidget.setDate(new Date(), true);
-                if (this.events_manager && this.events_manager.select_date) {
+                if (this.events_manager?.select_date) {
                     let selDate = this.calendarWidget.getSelectedDate ? this.calendarWidget.getSelectedDate() : new Date();
                     this.events_manager.select_date(selDate, true);
                 }
@@ -1065,7 +1088,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             for (let line of active.split('\n')) {
                 let lastColon = line.lastIndexOf(':');
                 if (lastColon > 0) {
-                    let rawName = line.substring(0, lastColon).replace(/\\:/g, ':');
+                    let rawName = line.substring(0, lastColon).replaceAll('\\:', ':');
                     let connType = line.substring(lastColon + 1);
                     if (connType.includes('wireless') || connType.includes('wifi')) {
                         ssid = rawName.replace(' automatique', '').trim();
@@ -1122,7 +1145,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         try {
             let on = this.color_settings.get_boolean('night-light-enabled');
             this.nightToggle.setActive(on, on ? 'Activé' : 'Désactivé');
-        } catch(e) { this.nightToggle.setActive(false, 'N/A'); }
+        } catch (e) {
+            global.logWarning('[ControlCenter] Night light state read failed: ' + e);
+            this.nightToggle.setActive(false, 'N/A');
+        }
     }
 
     /**
@@ -1133,7 +1159,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             let on = this.color_settings.get_boolean('night-light-enabled');
             this.color_settings.set_boolean('night-light-enabled', !on);
             this.nightToggle.setActive(!on, !on ? 'Activé' : 'Désactivé');
-        } catch(e) {}
+        } catch (e) {
+            global.logWarning('[ControlCenter] Night light toggle failed: ' + e);
+        }
     }
 
     /**
@@ -1143,7 +1171,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         try {
             let notifs = this.notif_settings.get_boolean('display-notifications');
             this.dndToggle.setActive(!notifs, !notifs ? 'Activé' : 'Désactivé');
-        } catch(e) { this.dndToggle.setActive(false, 'Désactivé'); }
+        } catch (e) {
+            global.logWarning('[ControlCenter] DND state read failed: ' + e);
+            this.dndToggle.setActive(false, 'Désactivé');
+        }
     }
 
     /**
@@ -1154,7 +1185,9 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             let notifs = this.notif_settings.get_boolean('display-notifications');
             this.notif_settings.set_boolean('display-notifications', !notifs);
             this.dndToggle.setActive(notifs, notifs ? 'Activé' : 'Désactivé');
-        } catch(e) {}
+        } catch (e) {
+            global.logWarning('[ControlCenter] DND toggle failed: ' + e);
+        }
     }
 
     /**
@@ -1172,7 +1205,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
      * `id` against `ALLOWED_POWER_PROFILES`.
      */
     _setPowerMode(id) {
-        if (!ALLOWED_POWER_PROFILES.includes(id)) return;
+        if (!ALLOWED_POWER_PROFILES.has(id)) return;
         Util.spawnCommandLine('powerprofilesctl set ' + id);
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => { this._refreshPowerMode(); return false; });
     }
