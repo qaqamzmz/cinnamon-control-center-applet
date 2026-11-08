@@ -188,6 +188,7 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             // Refresh all hardware/system states whenever the popup menu is opened
             this.menu.connect('open-state-changed', (menu, isOpen) => {
                 if (isOpen) {
+                    this._updatePopupMaxHeight();
                     this._refreshAllStates();
                     this._refreshCalendar();
                     this._refreshCalendarSources();
@@ -497,26 +498,57 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
     // ── Build popup ────────────────────────────────────────────────────────────
     /**
      * Assembles all visual sections of the Control Center popup menu.
+     * The header (date + Settings/Lock/Power actions) stays pinned at the top of `popupRoot`,
+     * while the remaining sections sit inside `mainScrollView` with an automatic lateral
+     * scrollbar whenever the content exceeds the available screen height.
      */
     _buildPopup() {
-        this.mainBox = new St.BoxLayout({ style_class: 'control-center-main-box', vertical: true });
-        this.menu.addActor(this.mainBox);
+        this.popupRoot = new St.BoxLayout({ style_class: 'control-center-root', vertical: true });
+        this.menu.addActor(this.popupRoot);
 
         this._buildHeader();
+
+        this.mainScrollView = new St.ScrollView({
+            style_class: 'cc-main-scrollview vfade',
+            hscrollbar_policy: St.PolicyType.NEVER,
+            vscrollbar_policy: St.PolicyType.AUTOMATIC,
+            x_fill: true,
+            y_fill: false
+        });
+        this.popupRoot.add(this.mainScrollView, { expand: true });
+
+        this.mainBox = new St.BoxLayout({ style_class: 'control-center-main-box', vertical: true });
+        this.mainScrollView.add_actor(this.mainBox);
+
         this._buildQuickToggles();
         this._buildPowerModes();
         this._buildVolumeSlider();
         this._buildBrightnessSlider();
         this._buildTabs();
+        this._updatePopupMaxHeight();
+    }
+
+    /**
+     * Dynamically constrains the maximum height of `mainScrollView` to fit within the
+     * primary monitor's height (leaving room for the Cinnamon panel and the pinned top header),
+     * ensuring the header never goes off-screen and a lateral scrollbar appears when needed.
+     */
+    _updatePopupMaxHeight() {
+        if (!this.mainScrollView) return;
+        let monHeight = Main.layoutManager?.primaryMonitor?.height || global.screen_height || 1080;
+        let panelHeight = this.panel?.height || 40;
+        let maxScrollHeight = Math.max(360, monHeight - panelHeight - 160);
+        this.mainScrollView.set_style('max-height: ' + maxScrollHeight + 'px;');
     }
 
     /**
      * Builds the top header bar displaying the current formatted date and
      * quick action buttons (System Settings, Screen Lock, Power Off dialog).
+     * Added directly to `popupRoot` so it remains permanently visible at the top.
      */
     _buildHeader() {
         let box = new St.BoxLayout({ style_class: 'cc-header-box', vertical: false });
-        this.mainBox.add_actor(box);
+        this.popupRoot.add_actor(box);
 
         this.headerDateLabel = new St.Label({
             style_class: 'cc-header-date-label',

@@ -32,11 +32,21 @@
   padding: 16px 18px;
 }
 
+.control-center-root {
+  min-width: 440px;
+  max-width: 480px;
+  spacing: 12px;
+}
+
+.cc-main-scrollview {
+  max-height: 780px;
+}
+
 .control-center-main-box {
   min-width: 440px;
   max-width: 480px;
   spacing: 14px;
-  padding: 2px 4px;
+  padding: 2px 6px 2px 4px;
 }
 
 /* 1. Header */
