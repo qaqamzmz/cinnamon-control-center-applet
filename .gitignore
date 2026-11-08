@@ -24,9 +24,23 @@ __pycache__/
 *.trace
 *.err
 
-# Local analysis tooling
+# Local Project Memory & Agent Instructions (ne jamais pousser sur Git)
+PROJECT_MEMORY.md
+*.memory.md
+MEMORY.md
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.agents/
+.agent/
+.gemini/
+
+# Local analysis tooling (SonarQube)
 sonar-project.properties
 .scannerwork/
+.sonar/
+.sonarqube/
+sonar-*.properties
 
 # Secrets & environment files
 .env
