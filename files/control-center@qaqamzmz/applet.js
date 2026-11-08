@@ -168,10 +168,21 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
             // First refresh once actors are realized in the Clutter scene
             this._init_timeout_id = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 600, () => {
                 this._init_timeout_id = 0;
+                this._enforceRightmostPosition();
                 this._refreshAllStates();
                 this._refreshCalendar();
                 return GLib.SOURCE_REMOVE;
             });
+
+            // Keep applet locked in the rightmost position (right before cornerbar@cinnamon.org)
+            this._updating_position = false;
+            this._enabled_applets_sig_id = 0;
+            if (global.settings) {
+                this._enabled_applets_sig_id = global.settings.connect(
+                    'changed::enabled-applets',
+                    () => this._enforceRightmostPosition()
+                );
+            }
 
             // Refresh all hardware/system states whenever the popup menu is opened
             this.menu.connect('open-state-changed', (menu, isOpen) => {
@@ -184,6 +195,99 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
 
         } catch (e) {
             global.logError('[ControlCenter] Constructor error: ' + e + '\nStack: ' + e.stack);
+        }
+    }
+
+    /**
+     * Overrides `Applet._setAppletReactivity()` to permanently inhibit drag-and-drop,
+     * preventing the applet from being moved even when `panel-edit-mode` is active.
+     */
+    _setAppletReactivity() {
+        if (this._draggable) {
+            this._draggable.inhibit = true;
+        }
+    }
+
+    /**
+     * Lifecycle hook invoked by Cinnamon once the applet is added to the panel.
+     * Enforces placement in the `right` zone right before `cornerbar@cinnamon.org`.
+     */
+    on_applet_added_to_panel() {
+        this._enforceRightmostPosition();
+    }
+
+    /**
+     * Scans the `right` zone of the given panel in `enabled-applets` to find the highest
+     * order among other applets and the position of `cornerbar@cinnamon.org` (if present).
+     *
+     * @param {string[]} list - Current `enabled-applets` array from GSettings
+     * @param {string} panelPrefix - Panel identifier (e.g. `panel1`)
+     * @param {string} myUuid - This applet's UUID (`control-center@qaqamzmz`)
+     * @returns {{maxOtherOrder: number, cornerIdx: number, cornerOrder: number}}
+     */
+    _scanRightZoneOrders(list, panelPrefix, myUuid) {
+        let maxOtherOrder = -1;
+        let cornerIdx = -1;
+        let cornerOrder = -1;
+
+        for (let i = 0; i < list.length; i++) {
+            let parts = list[i].split(':');
+            if (parts.length < 5 || parts[0] !== panelPrefix || parts[1] !== 'right') continue;
+            let order = Number.parseInt(parts[2], 10) || 0;
+            let uuid = parts[3].replace('!', '');
+            if (uuid === 'cornerbar@cinnamon.org') {
+                cornerIdx = i;
+                cornerOrder = order;
+            } else if (uuid !== myUuid && order > maxOtherOrder) {
+                maxOtherOrder = order;
+            }
+        }
+        return { maxOtherOrder, cornerIdx, cornerOrder };
+    }
+
+    /**
+     * Pins this applet in the `right` zone immediately before `cornerbar@cinnamon.org`
+     * (or at the very end of the `right` zone if `cornerbar@cinnamon.org` is absent).
+     */
+    _enforceRightmostPosition() {
+        if (this._updating_position || !global.settings) return;
+        try {
+            let list = global.settings.get_strv('enabled-applets');
+            let myUuid = this.metadata ? this.metadata.uuid : 'control-center@qaqamzmz';
+            let myIdx = list.findIndex(entry => {
+                let p = entry.split(':');
+                return p.length >= 5 && p[3].replace('!', '') === myUuid && String(p[4]) === String(this.instance_id);
+            });
+            if (myIdx === -1) return;
+
+            let myParts = list[myIdx].split(':');
+            let panelPrefix = myParts[0];
+            let myZone = myParts[1];
+            let myOrder = Number.parseInt(myParts[2], 10) || 0;
+
+            let { maxOtherOrder, cornerIdx, cornerOrder } = this._scanRightZoneOrders(list, panelPrefix, myUuid);
+            let alreadyLocked = myZone === 'right' &&
+                myOrder > maxOtherOrder &&
+                (cornerIdx === -1 || myOrder < cornerOrder);
+            if (alreadyLocked) return;
+
+            let targetOrder = maxOtherOrder + 1;
+            myParts[1] = 'right';
+            myParts[2] = String(targetOrder);
+            list[myIdx] = myParts.join(':');
+
+            if (cornerIdx !== -1 && cornerOrder <= targetOrder) {
+                let cParts = list[cornerIdx].split(':');
+                cParts[2] = String(targetOrder + 1);
+                list[cornerIdx] = cParts.join(':');
+            }
+
+            this._updating_position = true;
+            global.settings.set_strv('enabled-applets', list);
+            this._updating_position = false;
+        } catch (e) {
+            this._updating_position = false;
+            global.logError('[ControlCenter] _enforceRightmostPosition error: ' + e);
         }
     }
 
@@ -213,6 +317,10 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         if (this._init_timeout_id > 0) {
             GLib.source_remove(this._init_timeout_id);
             this._init_timeout_id = 0;
+        }
+        if (global.settings && this._enabled_applets_sig_id > 0) {
+            try { global.settings.disconnect(this._enabled_applets_sig_id); } catch (e) {}
+            this._enabled_applets_sig_id = 0;
         }
         if (this.clock && this.clock_notify_id > 0) {
             this.clock.disconnect(this.clock_notify_id);
