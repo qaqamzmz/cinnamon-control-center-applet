@@ -69,7 +69,7 @@ const ALLOWED_POWER_PROFILES = ['power-saver', 'balanced', 'performance'];
 function sanitizeCssColor(rawColor) {
     if (typeof rawColor !== 'string') return '';
     let trimmed = rawColor.trim();
-    if (/^(#[0-9a-fA-F]{3,8}|rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)|[a-zA-Z]{1,20})$/.test(trimmed)) {
+    if (/^(?:#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,20}|rgba?\([0-9,\s.]{5,30}\))$/.test(trimmed)) {
         return trimmed;
     }
     return '';
@@ -93,7 +93,7 @@ function sanitizeCssColor(rawColor) {
  */
 function runCmd(command) {
     try {
-        let [res, out, err, status] = GLib.spawn_command_line_sync(command);
+        let [res, out] = GLib.spawn_command_line_sync(command);
         if (!res || !out || out.length === 0) return '';
         return ByteArray.toString(out).trim();
     } catch (e) {
@@ -867,18 +867,15 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
         let uniqueErrors = [];
         let seen = {};
 
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
-            let timeMatch = line.match(/^([A-Za-zÀ-ÿ0-9]+\s+\d+\s+[\d:]+)\s+(\S+)\s+([^:]+):\s+(.*)$/);
-            let timeStr = '', srvStr = 'Système', msgStr = line;
-            if (timeMatch) {
-                timeStr = timeMatch[1];
-                srvStr = timeMatch[3];
-                msgStr = timeMatch[4];
-            }
+        for (let line of lines) {
+            let parsed = this._parseJournalLine(line);
+            let timeStr = parsed.timeStr;
+            let srvStr = parsed.srvStr;
+            let msgStr = parsed.msgStr;
 
-            // Normalize: strip PID to deduplicate identical errors across process restarts
-            let cleanSrv = srvStr.replace(/\[\d+\]/g, '').trim();
+            // Normalize: strip [PID] suffix to deduplicate identical errors across process restarts
+            let bracketIdx = srvStr.indexOf('[');
+            let cleanSrv = (bracketIdx !== -1 ? srvStr.substring(0, bracketIdx) : srvStr).trim();
             let cleanMsg = msgStr.trim();
             let key = cleanSrv + ':::' + cleanMsg;
 
@@ -922,6 +919,30 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
 
             this.errorsItemsBox.add_actor(card);
         });
+    }
+
+    /**
+     * Parses a standard `journalctl` syslog line in linear O(n) time without regular
+     * expression backtracking (eliminates ReDoS risk on malformed log lines).
+     *
+     * @param {string} line - Raw syslog line from journalctl
+     * @returns {{timeStr: string, srvStr: string, msgStr: string}}
+     */
+    _parseJournalLine(line) {
+        let colonIdx = line.indexOf(': ');
+        if (colonIdx <= 0) {
+            return { timeStr: '', srvStr: 'Système', msgStr: line };
+        }
+        let header = line.substring(0, colonIdx).trim();
+        let tokens = header.split(' ').filter(t => t.length > 0);
+        if (tokens.length < 5) {
+            return { timeStr: '', srvStr: 'Système', msgStr: line };
+        }
+        return {
+            timeStr: tokens.slice(0, 3).join(' '),
+            srvStr: tokens.slice(4).join(' '),
+            msgStr: line.substring(colonIdx + 2)
+        };
     }
 
     /**
@@ -1050,11 +1071,19 @@ class CinnamonControlCenterApplet extends Applet.TextIconApplet {
 
     /**
      * Queries PulseAudio/PipeWire default sink volume and mute status via `pactl`.
+     * Extracts the percentage in linear time without backtracking regular expressions.
      */
     _refreshVolume() {
         let volRaw = runCmd('pactl get-sink-volume @DEFAULT_SINK@');
-        let m = volRaw.match(/(\d+)%/);
-        let val = m ? parseInt(m[1], 10) : 50;
+        let pctIdx = volRaw.indexOf('%');
+        let val = 50;
+        if (pctIdx > 0) {
+            let prefix = volRaw.substring(Math.max(0, pctIdx - 4), pctIdx).trim();
+            let parsed = Number.parseInt(prefix.split(' ').pop(), 10);
+            if (!Number.isNaN(parsed)) {
+                val = parsed;
+            }
+        }
         this.volPercentLabel.set_text(val + '%');
         this.volumeSlider.setValue(val / 100.0);
 
