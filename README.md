@@ -1,5 +1,7 @@
 # Centre de Contrôle — Cinnamon applet
 
+> 🌐 **Navigation rapide / Quick navigation** : [🇫🇷 Guide d'installation (FR)](#guide-dinstallation-sur-un-poste-utilisateur-fr) · [🇬🇧 Installation Guide (EN)](#user-workstation-installation-guide-en) · [📅 External Calendars](#external-calendars-google-nextcloud-microsoft) · [📦 Requirements](#requirements) · [⚖️ License](#license)
+
 An all-in-one panel applet for the Cinnamon desktop, replacing the stock clock with a
 single control surface.
 
@@ -13,6 +15,8 @@ single control surface.
   journal.
 
 ## Guide d'installation sur un poste utilisateur (FR)
+
+> 🇬🇧 *Looking for the English version? Jump to the [User Workstation Installation Guide (EN)](#user-workstation-installation-guide-en).*
 
 ### 1. Prérequis système
 
@@ -83,6 +87,8 @@ rm -rf ~/.local/share/cinnamon/applets/control-center@qaqamzmz
 ---
 
 ## User Workstation Installation Guide (EN)
+
+> 🇫🇷 *Vous cherchez la version française ? Consultez le [Guide d'installation sur un poste utilisateur (FR)](#guide-dinstallation-sur-un-poste-utilisateur-fr).*
 
 ### 1. System Prerequisites
 
