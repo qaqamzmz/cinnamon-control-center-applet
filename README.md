@@ -217,4 +217,4 @@ tested**. Earlier 6.x releases are expected to work — the applet relies on
 
 ## License
 
-GPL-2.0-or-later, inherited from the Cinnamon code this applet builds on. See [LICENSE](LICENSE).
+`GPL-3.0-or-later` (GNU General Public License v3.0 or later), compatible with the upstream `GPL-2.0-or-later` Cinnamon code this applet builds on. See [LICENSE](LICENSE).
