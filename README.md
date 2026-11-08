@@ -82,21 +82,73 @@ rm -rf ~/.local/share/cinnamon/applets/control-center@qaqamzmz
 
 ---
 
-## Installation (EN)
+## User Workstation Installation Guide (EN)
+
+### 1. System Prerequisites
+
+On Linux Mint, Debian, or Ubuntu running the **Cinnamon desktop (6.0 to 6.6)**, ensure the optional system utilities are installed to take advantage of every Control Center feature:
 
 ```bash
-git clone git@github.com:qaqamzmz/cinnamon-control-center-applet.git
-ln -s "$PWD/cinnamon-control-center-applet/files/control-center@qaqamzmz" \
+sudo apt update
+sudo apt install -y \
+  gir1.2-edataserver-1.2 \
+  evolution-data-server \
+  gnome-online-accounts-gtk \
+  gnome-calendar \
+  power-profiles-daemon \
+  network-manager \
+  bluez \
+  rfkill \
+  pulseaudio-utils \
+  x11-xserver-utils
+```
+
+### 2. Downloading and Installing the Applet
+
+Create your user Cinnamon applets directory if it does not already exist, then copy (or symlink) the applet into it:
+
+#### Option A — Direct Copy (recommended for end-user workstations)
+
+```bash
+mkdir -p ~/.local/share/cinnamon/applets
+git clone https://github.com/qaqamzmz/cinnamon-control-center-applet.git /tmp/cinnamon-control-center-applet
+cp -r /tmp/cinnamon-control-center-applet/files/control-center@qaqamzmz ~/.local/share/cinnamon/applets/
+rm -rf /tmp/cinnamon-control-center-applet
+```
+
+#### Option B — Symbolic Link (recommended for developers / updating via `git pull`)
+
+```bash
+mkdir -p ~/.local/share/cinnamon/applets
+git clone https://github.com/qaqamzmz/cinnamon-control-center-applet.git ~/cinnamon-control-center-applet
+ln -s "$HOME/cinnamon-control-center-applet/files/control-center@qaqamzmz" \
       ~/.local/share/cinnamon/applets/control-center@qaqamzmz
 ```
 
-Or copy instead of symlinking:
+### 3. Enabling the Applet in the Cinnamon Panel
+
+1. **Right-click** on your Cinnamon panel → **Applets** (or run `cinnamon-settings applets` in a terminal).
+2. In the **Manage** tab, search for **Centre de Contrôle** (`control-center@qaqamzmz`).
+3. Select it and click the **`+`** button at the bottom of the window to add it to your panel.
+4. *(Optional)* You can remove the stock clock applet (`calendar@cinnamon.org`) since **Centre de Contrôle** already displays the time in the panel and integrates the full calendar view.
+5. If you update the applet files later, reload Cinnamon with `Alt+F2` then `r` (Enter), or via D-Bus:
+   ```bash
+   dbus-send --session --dest=org.Cinnamon --type=method_call /org/Cinnamon org.Cinnamon.Eval string:'Main.AppletManager.reload_applet_by_uuid("control-center@qaqamzmz");'
+   ```
+
+### 4. Synchronizing External Calendars (Google, Nextcloud, Microsoft…)
+
+1. Click the **Centre de Contrôle** applet → **📅 Agenda** tab → **`+ Compte en ligne`** button (or run `gnome-online-accounts-gtk`).
+2. Sign in to your online account and make sure the **Calendar** switch is enabled.
+3. Synchronized calendars automatically appear under the **Calendriers** section of the applet: click any row to show or hide its events.
+
+### 5. Uninstallation
+
+Remove the applet from `cinnamon-settings applets`, then delete its directory:
 
 ```bash
-cp -r files/control-center@qaqamzmz ~/.local/share/cinnamon/applets/
+rm -rf ~/.local/share/cinnamon/applets/control-center@qaqamzmz
 ```
-
-Then add the applet from *System Settings → Applets*, or with `cinnamon-settings applets`.
 
 ## External calendars (Google, Nextcloud, Microsoft…)
 
